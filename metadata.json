@@ -1,0 +1,6 @@
+{
+  "name": "CareerAI - AI Job & Resume Matching Platform",
+  "description": "Production-ready SaaS platform connecting candidates and employers with explainable AI job matching, ATS resume scoring, skill-gap analysis, and interview prep.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

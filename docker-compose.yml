@@ -1,0 +1,100 @@
+version: "3.9"
+
+services:
+  # 1. PostgreSQL 16 with pgvector & pgcrypto
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: careerai-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secure_pass
+      POSTGRES_DB: career_ai_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docs/DATABASE.md:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d career_ai_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis 7 In-Memory Cache & OTP Session Broker
+  redis:
+    image: redis:7-alpine
+    container_name: careerai-redis
+    restart: always
+    command: redis-server --appendonly yes --requirepass redis_secure_pass
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_secure_pass", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. FastAPI REST Application Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: careerai-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres_secure_pass@postgres:5432/career_ai_db
+      - REDIS_URL=redis://:redis_secure_pass@redis:6379/0
+      - JWT_SECRET=super_secret_jwt_key_careerai_production_2026
+      - JWT_REFRESH_SECRET=super_secret_refresh_key_careerai_production_2026
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-mock_key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # 4. Celery Async Task Worker (Resume OCR, AI Batching, Notifications)
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: careerai-worker
+    restart: always
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres_secure_pass@postgres:5432/career_ai_db
+      - REDIS_URL=redis://:redis_secure_pass@redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-mock_key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # 5. Frontend React SPA (Vite + Nginx Production / Dev)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: careerai-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
